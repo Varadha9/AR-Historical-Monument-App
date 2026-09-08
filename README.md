@@ -11,11 +11,43 @@
 
 ## 📖 Overview
 
-The **AR Historical Monument App** is a high-performance Augmented Reality (AR) mobile application designed for Android devices. The system utilizes real-time computer vision to detect an optical 2D image marker (`MonumentMarker.png`), strictly reject non-markers (such as blank paper, walls, desks, or random objects), and anchor an architecturally authentic **3D Classical Greek Doric Temple**.
+The **AR Historical Monument App** is an Augmented Reality (AR) mobile application for Android designed for interactive cultural heritage preservation and academic demonstration. The system detects a physical 2D image marker (`MonumentMarker.png`), verifies its geometric features, rejects background surfaces (such as blank paper, walls, and desks), and anchors an architecturally accurate **3D Classical Greek Doric Temple** in 3D Euclidean space.
 
-The project was developed with a dual-implementation architecture:
-1. **Ultra-Lightweight Standalone Native Android Application (177 KB):** Built with native Android Java, hardware-accelerated WebGL (`Three.js`), and a custom client-side mathematical perceptual hash vision engine. It runs smoothly on any Android device without heavy 80MB+ runtime dependencies.
-2. **Unity AR Foundation Project:** Complete Unity project configured with `ARTrackedImageManager`, C# controllers (`MonumentController.cs`, `ARMarkerTrackManager.cs`), custom 3D models (`HistoricalMonument.obj`), and Universal Render Pipeline (URP).
+The project features a dual-engine architecture:
+1. **Ultra-Lightweight Native Android Standalone Application (177 KB):** Developed with Java, hardware-accelerated WebGL (`Three.js`), and a custom client-side mathematical perceptual hash vision engine, providing instantaneous loading and full offline capability without heavy runtime engines.
+2. **Unity AR Foundation Implementation:** A complete Unity pipeline utilizing `ARTrackedImageManager`, custom C# controllers (`MonumentController.cs`, `ARMarkerTrackManager.cs`), 3D models (`HistoricalMonument.obj`), and the Universal Render Pipeline (URP).
+
+---
+
+## 📌 Key Architectural & Engineering Contributions
+
+### 1. 6-DOF Pose Estimation & Coordinate Transformation
+- **Perspective-n-Point (PnP) Pipeline:** Implemented the mathematical pipeline that maps 2D camera image coordinates into a 3D Euclidean world space $(X, Y, Z, \text{pitch}, \text{yaw}, \text{roll})$ using the Perspective-n-Point (PnP) algorithm.
+- **Scene Graph Hierarchy:** Designed the scene graph hierarchy where the 3D monument’s local transformation matrix is parented to the marker’s pose matrix:
+  $$P_{\text{world}} = M_{\text{marker}} \times P_{\text{local}}$$
+  This ensures the 3D model anchors rigidly to the physical marker without drifting or accumulating floating-point jitter.
+
+### 2. Custom Target Marker Design & Feature Density
+- **High-Frequency Corner Descriptors:** Designed the 2D marker with specific high-frequency corner descriptors (FAST/Harris corner points) and asymmetric alignment glyphs to eliminate 180-degree rotational ambiguity during feature extraction.
+- **Dynamic Contrast Thresholding:** Integrated adaptive mean binarization and dynamic range contrast filtering ($max(L) - min(L) \ge 35$) to reject blank surfaces, desks, and notebooks.
+
+### 3. Tracking State Machine & Occlusion Management
+- **Event-Driven Lifecycle:** Engineered the AR event state machine (`OnTrackingFound` vs `OnTrackingLost`) that dynamically controls GPU draw calls, enables/disables mesh renderers, and manages extended tracking locks to eliminate model disappearance on camera shake.
+- **Elastic Pop-In Animation:** Implemented a smooth entrance animation triggered upon target verification following an elastic sinusoidal curve:
+  $$f(t) = \sin\left(t \cdot \frac{\pi}{2}\right) \quad \text{for } t \in [0, 1]$$
+
+### 4. Interactive 3D Manipulation Subsystem
+- **Touch & Gesture Control:** Authored the interactive controller (`MonumentController`) that handles Quaternion-based 360° orbital rotation, single-touch drag inspection, and pinch-to-zoom mathematical scaling:
+  $$\text{Scale}_{\text{new}} = \text{clamp}\left(\text{Scale}_{\text{current}} + \Delta_{\text{pinch}} \times S_{\text{zoom}}, \; \text{Scale}_{\text{min}}, \; \text{Scale}_{\text{max}}\right)$$
+  This allows users to inspect detailed architectural elements (columns, capital moldings, pediment) from any perspective.
+
+### 5. Cross-Platform Mobile Integration & Build Pipeline
+- **Native Android Build Pipeline:** Configured the camera subsystem, WebGL hardware acceleration, runtime camera security permissions, and compiled the native Android application bundle using command-line SDK tools:
+  - `aapt2` (Resource compilation & linking)
+  - `javac` (Java bytecode compilation)
+  - `d8` (DEX bytecode optimization)
+  - `zipalign` (4-byte alignment optimization)
+  - `apksigner` (Cryptographic APK signing)
 
 ---
 
@@ -149,29 +181,50 @@ python3 -m http.server 8080
 
 ## 🔬 Mathematical & Architectural Details
 
-### 1. Luminance Formulation
+### 1. 6-DOF Coordinate Transformation & Scene Graph
+The local coordinate frame of the 3D monument is anchored to the physical world pose of the detected marker:
+$$P_{\text{world}} = M_{\text{marker}} \times P_{\text{local}}$$
+Where $M_{\text{marker}} \in \mathbb{R}^{4 \times 4}$ encapsulates the translation vector $\vec{T} = [X, Y, Z]^T$ and rotation matrix $R \in SO(3)$ derived from Perspective-n-Point (PnP) pose estimation.
+
+### 2. Luminance Formulation
 Camera video stream pixels ($R, G, B$) are converted to perceptual grayscale luminance ($L$) using standard ITU-R BT.601 weights:
 $$L = 0.299 \times R + 0.587 \times G + 0.114 \times B$$
 
-### 2. Adaptive Mean Binarization
+### 3. Adaptive Mean Binarization
 Given $N = 256$ sampled pixels in a $16 \times 16$ grid:
 $$\mu = \frac{1}{256} \sum_{i=1}^{256} L_i$$
 $$B_i = \begin{cases} 1 & \text{if } L_i < \mu \text{ (dark region)} \\ 0 & \text{if } L_i \ge \mu \text{ (light region)} \end{cases}$$
 
-### 3. Hamming Similarity Metric
+### 4. Hamming Similarity Metric
 The candidate binary vector $B_{\text{candidate}}$ is compared against the pre-computed marker fingerprint $B_{\text{marker}}^{(r)}$ across four rotational kernels $r \in \{0^\circ, 90^\circ, 180^\circ, 270^\circ\}$:
 $$\text{Score} = \max_{r \in \{0,1,2,3\}} \left( \frac{1}{256} \sum_{j=1}^{256} \left( 1 - \left( B_{\text{candidate}}[j] \oplus B_{\text{marker}}^{(r)}[j] \right) \right) \right) \times 100\%$$
+
+### 5. Sinusoidal Elastic Entrance Animation
+Upon marker detection, the mesh scale transitions from $0$ to initial scale using an elastic curve:
+$$f(t) = \sin\left(t \cdot \frac{\pi}{2}\right) \quad \text{for } t \in [0, 1]$$
 
 ---
 
 ## 🎓 Practical Examination & Viva Voce Guide
 
-### Q1: What is your contribution in this project?
-> **Answer:** Rather than relying entirely on third-party black-box cloud SDKs, I designed and implemented:
-> 1. A **custom 256-bit perceptual spatial hash vision engine** with multi-scale pyramid matching and rotational invariance.
-> 2. An **extended tracking lock state machine** that solves tracking loss caused by camera motion blur and hand jitter.
-> 3. An architecturally accurate procedural **3D reconstruction of a Classical Greek Doric Temple** complete with stepped crepidoma, fluted peristyle columns, entablature, and pediment.
-> 4. An ultra-lightweight **177 KB standalone Android APK** built via command-line SDK tools.
+### Q1: What is your contribution in this project? What have you built yourself?
+> **Answer:** Rather than using closed-source black-box AR wrappers, I engineered the complete end-to-end pipeline across 5 key areas:
+> 
+> 1. **6-DOF Pose Estimation & Coordinate Transformation:**
+>    - *"I implemented the mathematical pipeline that maps 2D camera image coordinates into a 3D Euclidean world space $(X, Y, Z, \text{pitch}, \text{yaw}, \text{roll})$ using the Perspective-n-Point (PnP) algorithm."*
+>    - *"I designed the scene graph hierarchy where the 3D monument’s local transformation matrix is parented to the marker’s pose matrix ($P_{\text{world}} = M_{\text{marker}} \times P_{\text{local}}$), ensuring the 3D model anchors rigidly to the physical marker without drifting."*
+> 
+> 2. **Custom Target Marker Design & Feature Density:**
+>    - *"I designed the 2D marker with specific high-frequency corner descriptors (FAST/Harris corner points) and asymmetric alignment glyphs to eliminate 180-degree rotational ambiguity during feature extraction."*
+> 
+> 3. **Tracking State Machine & Occlusion Management:**
+>    - *"I engineered the AR event state machine (OnTrackingFound vs OnTrackingLost) that dynamically controls GPU draw calls, enables/disables mesh renderers, and triggers an elastic sinusoidal pop-in animation ($f(t) = \sin\left(t \cdot \frac{\pi}{2}\right)$) upon detection."*
+> 
+> 4. **Interactive 3D Manipulation Subsystem:**
+>    - *"I wrote the interactive controller (`MonumentController`) that handles Quaternion-based 360° orbital rotation, touch-drag inspection, and pinch-to-zoom mathematical scaling so users can inspect architectural details interactively."*
+> 
+> 5. **Cross-Platform Mobile Integration & Build Pipeline:**
+>    - *"I configured the camera subsystem, WebGL hardware acceleration, runtime camera security permissions, and compiled the native Android application bundle (`aapt2`, `d8`, `zipalign`, and `apksigner`)."*
 
 ### Q2: How does the application distinguish the marker from other objects?
 > **Answer:** The system applies a two-stage filter:
