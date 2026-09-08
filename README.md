@@ -205,37 +205,6 @@ $$f(t) = \sin\left(t \cdot \frac{\pi}{2}\right) \quad \text{for } t \in [0, 1]$$
 
 ---
 
-## 🎓 Practical Examination & Viva Voce Guide
-
-### Q1: What is your contribution in this project? What have you built yourself?
-> **Answer:** Rather than using closed-source black-box AR wrappers, I engineered the complete end-to-end pipeline across 5 key areas:
-> 
-> 1. **6-DOF Pose Estimation & Coordinate Transformation:**
->    - *"I implemented the mathematical pipeline that maps 2D camera image coordinates into a 3D Euclidean world space $(X, Y, Z, \text{pitch}, \text{yaw}, \text{roll})$ using the Perspective-n-Point (PnP) algorithm."*
->    - *"I designed the scene graph hierarchy where the 3D monument’s local transformation matrix is parented to the marker’s pose matrix ($P_{\text{world}} = M_{\text{marker}} \times P_{\text{local}}$), ensuring the 3D model anchors rigidly to the physical marker without drifting."*
-> 
-> 2. **Custom Target Marker Design & Feature Density:**
->    - *"I designed the 2D marker with specific high-frequency corner descriptors (FAST/Harris corner points) and asymmetric alignment glyphs to eliminate 180-degree rotational ambiguity during feature extraction."*
-> 
-> 3. **Tracking State Machine & Occlusion Management:**
->    - *"I engineered the AR event state machine (OnTrackingFound vs OnTrackingLost) that dynamically controls GPU draw calls, enables/disables mesh renderers, and triggers an elastic sinusoidal pop-in animation ($f(t) = \sin\left(t \cdot \frac{\pi}{2}\right)$) upon detection."*
-> 
-> 4. **Interactive 3D Manipulation Subsystem:**
->    - *"I wrote the interactive controller (`MonumentController`) that handles Quaternion-based 360° orbital rotation, touch-drag inspection, and pinch-to-zoom mathematical scaling so users can inspect architectural details interactively."*
-> 
-> 5. **Cross-Platform Mobile Integration & Build Pipeline:**
->    - *"I configured the camera subsystem, WebGL hardware acceleration, runtime camera security permissions, and compiled the native Android application bundle (`aapt2`, `d8`, `zipalign`, and `apksigner`)."*
-
-### Q2: How does the application distinguish the marker from other objects?
-> **Answer:** The system applies a two-stage filter:
-> - **Stage 1 (Dynamic Range Check):** Computes luminance spread ($max(L) - min(L)$). Blank walls, desks, and notebook paper lack high-frequency spatial variation and are instantly rejected ($25\%$).
-> - **Stage 2 (Spatial Hash Correlation):** Evaluates Hamming similarity against the 256-bit structural fingerprint of the marker across multiple scales and rotations. Random objects score $< 55\%$, while the genuine marker achieves $> 78\%$.
-
-### Q3: Why does the 3D model not disappear when the phone is shaken?
-> **Answer:** The app implements **Extended Tracking**. Once marker verification occurs, the system locks the transform and visual state. Subsequent frames maintain the anchor without requiring continuous millisecond-level optical re-verification, ensuring immunity to hand shake and sudden camera movements.
-
----
-
 ## 📜 License
 
 This project is licensed under the MIT License — feel free to use and adapt it for academic and research purposes.
