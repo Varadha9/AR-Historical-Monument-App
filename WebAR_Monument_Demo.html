@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR Historical Monument 3D Reconstruction</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { overflow: hidden; background: #0b0d14; color: #fff; width: 100vw; height: 100vh; }
+        
+        #video-feed {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; filter: brightness(0.9);
+        }
+        #three-canvas {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: auto;
+        }
+
+        /* Top HUD Bar */
+        .hud-header {
+            position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+            background: rgba(13, 17, 26, 0.88); backdrop-filter: blur(12px);
+            padding: 10px 24px; border-radius: 30px; z-index: 10;
+            display: flex; align-items: center; gap: 14px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1);
+        }
+        .status-dot {
+            width: 12px; height: 12px; border-radius: 50%; background: #00ff88;
+            box-shadow: 0 0 12px #00ff88; animation: pulse 1.8s infinite;
+        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .status-text { font-size: 14px; font-weight: 600; letter-spacing: 0.5px; }
+
+        /* Marker Target Preview Window */
+        .marker-preview-card {
+            position: absolute; top: 16px; right: 16px; width: 140px;
+            background: rgba(17, 24, 39, 0.9); border-radius: 12px; padding: 10px;
+            z-index: 10; border: 1px solid rgba(255,255,255,0.15); text-align: center;
+        }
+        .marker-preview-card img { width: 100%; border-radius: 6px; border: 1px solid #444; }
+        .marker-preview-card span { font-size: 11px; color: #94a3b8; display: block; margin-top: 6px; }
+
+        /* Bottom Monument Info Card */
+        .info-card {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            width: min(92%, 580px); background: rgba(15, 23, 42, 0.92);
+            backdrop-filter: blur(16px); border-radius: 18px; padding: 18px 24px;
+            z-index: 10; box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+            border: 1px solid rgba(255,255,255,0.12);
+            transition: all 0.3s ease;
+        }
+        .info-card h2 { font-size: 18px; color: #fbbf24; display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+        .info-card p { font-size: 13px; color: #cbd5e1; line-height: 1.5; margin-bottom: 12px; }
+        
+        .controls { display: flex; gap: 10px; flex-wrap: wrap; }
+        .btn {
+            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+            color: #fff; padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 500;
+            cursor: pointer; transition: 0.2s;
+        }
+        .btn:hover { background: rgba(255,255,255,0.2); transform: translateY(-1px); }
+        .btn-active { background: #3b82f6; border-color: #60a5fa; }
+
+        /* AR Reticle / Scanner guide */
+        .reticle {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 240px; height: 240px; border: 2px dashed rgba(255,255,255,0.25);
+            border-radius: 16px; z-index: 3; pointer-events: none;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .reticle.tracked { border-color: rgba(0, 255, 136, 0.5); }
+    </style>
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+    <video id="video-feed" autoplay playsinline muted></video>
+    <div id="three-canvas"></div>
+
+    <div class="hud-header">
+        <div class="status-dot" id="dot"></div>
+        <div class="status-text" id="status-text">Marker Recognized — 3D Reconstruction Active</div>
+    </div>
+
+    <div class="marker-preview-card">
+        <img src="Assets/Textures/MonumentMarker.png" alt="Target Marker" />
+        <span>Predefined Marker</span>
+    </div>
+
+    <div class="reticle tracked" id="reticle"></div>
+
+    <div class="info-card" id="info-card">
+        <h2>🏛️ Classical Temple (Historical Monument)</h2>
+        <p>
+            <strong>Era:</strong> 5th Century BCE (Classical Antiquity)<br>
+            <strong>Architecture:</strong> Doric Hexastyle Peripteral Temple with Crepidoma Base.<br>
+            <strong>Tracking Pipeline:</strong> Video Camera → FAST/ORB Feature Points → PnP Pose Estimation → 3D Model Registration.
+        </p>
+        <div class="controls">
+            <button class="btn btn-active" id="btn-rotate" onclick="toggleAutoRotate()">Auto-Rotate: ON</button>
+            <button class="btn" onclick="resetModel()">Reset Orientation</button>
+            <button class="btn" onclick="toggleTracking()">Toggle Marker State</button>
+        </div>
+    </div>
+
+    <script>
+        // 1. Live WebCam Background
+        const video = document.getElementById('video-feed');
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+                .then(stream => { video.srcObject = stream; })
+                .catch(err => {
+                    console.log("No webcam access; using simulated AR background.");
+                    video.style.background = "linear-gradient(135deg, #111827 0%, #1e293b 100%)";
+                });
+        }
+
+        // 2. Three.js AR 3D Scene Setup
+        const container = document.getElementById('three-canvas');
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 3.2, 5.2);
+
+        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxPolarAngle = Math.PI / 2 + 0.1;
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xfffaed, 1.2);
+        dirLight.position.set(5, 10, 5);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+
+        // 3. Procedural 3D Historical Monument Reconstruction
+        const monumentGroup = new THREE.Group();
+
+        const stoneMat = new THREE.MeshStandardMaterial({
+            color: 0xded8ce,
+            roughness: 0.65,
+            metalness: 0.05
+        });
+        const darkStoneMat = new THREE.MeshStandardMaterial({
+            color: 0x9ca3af,
+            roughness: 0.8
+        });
+
+        // Crepidoma (3-tiered base steps)
+        const base1 = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.12, 2.6), darkStoneMat);
+        base1.position.y = 0.06;
+        monumentGroup.add(base1);
+
+        const base2 = new THREE.Mesh(new THREE.BoxGeometry(3.3, 0.12, 2.3), darkStoneMat);
+        base2.position.y = 0.18;
+        monumentGroup.add(base2);
+
+        const base3 = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.12, 2.0), stoneMat);
+        base3.position.y = 0.30;
+        monumentGroup.add(base3);
+
+        // Cella (Inner Chamber)
+        const cella = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.1, 1.1), stoneMat);
+        cella.position.y = 0.91;
+        monumentGroup.add(cella);
+
+        // Columns (Fluted Columns around perimeter)
+        const colGeom = new THREE.CylinderGeometry(0.08, 0.09, 1.1, 14);
+        const colCapGeom = new THREE.BoxGeometry(0.22, 0.05, 0.22);
+        const colX = [-1.3, -0.78, -0.26, 0.26, 0.78, 1.3];
+
+        colX.forEach(x => {
+            [-0.82, 0.82].forEach(z => {
+                const col = new THREE.Mesh(colGeom, stoneMat);
+                col.position.set(x, 0.91, z);
+                monumentGroup.add(col);
+
+                const cap = new THREE.Mesh(colCapGeom, stoneMat);
+                cap.position.set(x, 1.48, z);
+                monumentGroup.add(cap);
+
+                const base = new THREE.Mesh(colCapGeom, stoneMat);
+                base.position.set(x, 0.38, z);
+                monumentGroup.add(base);
+            });
+        });
+
+        // Flank columns
+        [-1.3, 1.3].forEach(x => {
+            const col = new THREE.Mesh(colGeom, stoneMat);
+            col.position.set(x, 0.91, 0);
+            monumentGroup.add(col);
+        });
+
+        // Entablature (Architrave and Frieze)
+        const architrave = new THREE.Mesh(new THREE.BoxGeometry(3.1, 0.14, 2.1), stoneMat);
+        architrave.position.y = 1.55;
+        monumentGroup.add(architrave);
+
+        const frieze = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.1, 2.2), darkStoneMat);
+        frieze.position.y = 1.67;
+        monumentGroup.add(frieze);
+
+        // Pediment (Triangular Gable Roof)
+        const pedimentShape = new THREE.Shape();
+        pedimentShape.moveTo(-1.6, 0);
+        pedimentShape.lineTo(0, 0.65);
+        pedimentShape.lineTo(1.6, 0);
+        pedimentShape.closePath();
+
+        const extrudeSettings = { depth: 2.2, bevelEnabled: false };
+        const pedimentGeom = new THREE.ExtrudeGeometry(pedimentShape, extrudeSettings);
+        const pediment = new THREE.Mesh(pedimentGeom, stoneMat);
+        pediment.position.set(0, 1.72, -1.1);
+        monumentGroup.add(pediment);
+
+        // Target Marker Anchor Plate (Virtual ground marker)
+        const markerPlaneGeom = new THREE.PlaneGeometry(3.6, 3.6);
+        const markerTexture = new THREE.TextureLoader().load('Assets/Textures/MonumentMarker.png');
+        const markerPlaneMat = new THREE.MeshBasicMaterial({ map: markerTexture, side: THREE.DoubleSide });
+        const markerPlane = new THREE.Mesh(markerPlaneGeom, markerPlaneMat);
+        markerPlane.rotation.x = -Math.PI / 2;
+        markerPlane.position.y = -0.01;
+        monumentGroup.add(markerPlane);
+
+        scene.add(monumentGroup);
+
+        // 4. Animation and Interaction
+        let isAutoRotating = true;
+        let isMarkerTracked = true;
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (isAutoRotating && isMarkerTracked) {
+                monumentGroup.rotation.y += 0.008;
+            }
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Controls
+        function toggleAutoRotate() {
+            isAutoRotating = !isAutoRotating;
+            const btn = document.getElementById('btn-rotate');
+            btn.textContent = `Auto-Rotate: ${isAutoRotating ? 'ON' : 'OFF'}`;
+            btn.classList.toggle('btn-active', isAutoRotating);
+        }
+
+        function resetModel() {
+            monumentGroup.rotation.set(0, 0, 0);
+            camera.position.set(0, 3.2, 5.2);
+            controls.target.set(0, 1, 0);
+        }
+
+        function toggleTracking() {
+            isMarkerTracked = !isMarkerTracked;
+            monumentGroup.visible = isMarkerTracked;
+            document.getElementById('info-card').style.display = isMarkerTracked ? 'block' : 'none';
+            document.getElementById('reticle').classList.toggle('tracked', isMarkerTracked);
+            
+            const dot = document.getElementById('dot');
+            const statusText = document.getElementById('status-text');
+            if (isMarkerTracked) {
+                dot.style.background = '#00ff88';
+                dot.style.boxShadow = '0 0 12px #00ff88';
+                statusText.innerHTML = 'Marker Recognized — 3D Reconstruction Active';
+            } else {
+                dot.style.background = '#eab308';
+                dot.style.boxShadow = '0 0 12px #eab308';
+                statusText.innerHTML = 'Point Camera at Monument Marker';
+            }
+        }
+    </script>
+</body>
+</html>

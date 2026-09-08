@@ -1,0 +1,7 @@
+# Historical Monument Material
+newmtl MonumentStone
+Ka 0.8 0.8 0.75
+Kd 0.9 0.88 0.82
+Ks 0.2 0.2 0.2
+Ns 20
+map_Kd ../Textures/StoneMarble.png

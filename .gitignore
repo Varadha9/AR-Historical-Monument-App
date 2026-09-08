@@ -1,0 +1,34 @@
+# Unity generated
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Mm]emoryCaptures/
+Recordings/
+
+# Visual Studio / VS Code
+.vscode/
+.vs/
+*.csproj
+*.unityproj
+*.sln
+*.user
+*.userprefs
+*.pidb
+*.booproj
+
+# Android Intermediate Build Files
+Android_Build/bin/
+Android_Build/classes.dex
+Android_Build/compiled_res.zip
+Android_Build/base.apk
+Android_Build/aligned.apk
+Android_Build/*.idsig
+
+# OS generated
+.DS_Store
+Thumbs.db
+Android_Build/*.apk
